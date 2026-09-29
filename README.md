@@ -14,12 +14,13 @@ uvicorn app:app --port 8005
 Open http://127.0.0.1:8005
 
 ## API
-- `GET /api/status` → `{has_key, model}`
-- `POST /api/verify` `{api_key}` → verifies via `models.list`
-- `POST /api/generate` multipart `image` (JPG/PNG/WEBP/GIF ≤10MB) + `style_hint?` + `api_key?` → `{html}`
-- `POST /api/refine` JSON `{html, instruction, api_key?}` → `{html}`
+- `GET /api/status` → `{has_key, model, source}` (presence/source only, never key material)
+- `POST /api/key` `{key}` → verifies via `models.list`, stores in server process memory only
+- `DELETE /api/key` → clears the server-memory key
+- `POST /api/generate` multipart `image` (JPG/PNG/WEBP/GIF ≤10MB) + `style_hint?` → `{html}`
+- `POST /api/refine` JSON `{html, instruction}` → `{html}`
 
-Key resolution: explicit `api_key` → `X-Groq-Key` header → `Authorization: Bearer` → `GROQ_API_KEY` → `GROQ_TEST_KEY` env.
+Key resolution: server-memory key (set via `POST /api/key`) → `GROQ_API_KEY` → `GROQ_TEST_KEY` env. Per-request client keys (multipart/header/JSON) are NOT accepted. The browser never stores or re-sends the key.
 
 ## Safety
 - Uploads are Pillow-validated, downscaled server-side (longest side 1280px), never executed.

@@ -1,12 +1,11 @@
 const $ = (id) => document.getElementById(id);
-const state = { file: null, html: "", key: sessionStorage.getItem("groq_key") || "" };
+const state = { file: null, html: "" };
 
 function showError(m) { const e = $("errorBox"); e.hidden = !m; e.textContent = m || ""; }
 function setLoading(on, t) { $("loading").hidden = !on; if (t) $("loadingText").textContent = t; }
 async function refreshStatus() {
   try {
-    const headers = state.key ? { "X-Groq-Key": state.key } : {};
-    const r = await fetch("/api/status", { headers });
+    const r = await fetch("/api/status");
     const j = await r.json();
     const pill = $("statusPill");
     if (j.has_key) { pill.textContent = "key ✓"; pill.className = "pill on"; }
@@ -57,7 +56,6 @@ $("generateBtn").addEventListener("click", async () => {
     const fd = new FormData();
     fd.append("image", state.file);
     fd.append("style_hint", $("styleHint").value || "");
-    if (state.key) fd.append("api_key", state.key);
     const r = await fetch("/api/generate", { method: "POST", body: fd });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
@@ -76,7 +74,7 @@ $("refineBtn").addEventListener("click", async () => {
   try {
     const r = await fetch("/api/refine", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html: state.html, instruction: ins, api_key: state.key || undefined }),
+      body: JSON.stringify({ html: state.html, instruction: ins }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
@@ -106,20 +104,25 @@ $("downloadBtn").addEventListener("click", () => {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 });
 
-// settings modal
-$("settingsBtn").addEventListener("click", () => { $("settingsModal").hidden = false; $("keyInput").value = state.key; $("keyMsg").textContent = state.key ? "Key loaded from session memory." : ""; });
+// settings modal — key lives only in server memory, never in browser storage
+$("settingsBtn").addEventListener("click", () => { $("settingsModal").hidden = false; $("keyInput").value = ""; $("keyMsg").textContent = ""; });
 $("closeSettingsBtn").addEventListener("click", () => $("settingsModal").hidden = true);
-$("removeKeyBtn").addEventListener("click", () => { state.key = ""; sessionStorage.removeItem("groq_key"); $("keyInput").value = ""; $("keyMsg").textContent = "Key removed from session."; refreshStatus(); });
+$("removeKeyBtn").addEventListener("click", async () => {
+  try {
+    await fetch("/api/key", { method: "DELETE" });
+  } catch { /* offline */ }
+  $("keyInput").value = ""; $("keyMsg").textContent = "Key removed from server memory."; refreshStatus();
+});
 $("saveKeyBtn").addEventListener("click", async () => {
   const k = $("keyInput").value.trim();
   if (!k) { $("keyMsg").textContent = "Paste a key first."; return; }
   $("keyMsg").textContent = "Verifying…";
   try {
-    const r = await fetch("/api/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ api_key: k }) });
+    const r = await fetch("/api/key", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: k }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.ok) throw new Error(j.error || `Verify failed (${r.status})`);
-    state.key = k; sessionStorage.setItem("groq_key", k);
-    $("keyMsg").textContent = "✓ Key verified & saved (session only).";
+    $("keyInput").value = "";
+    $("keyMsg").textContent = "✓ Key verified & saved in server memory.";
     refreshStatus();
   } catch (e) { $("keyMsg").textContent = e.message; }
 });

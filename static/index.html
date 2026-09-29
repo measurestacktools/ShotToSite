@@ -66,7 +66,7 @@
 <div id="settingsModal" class="modal" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-label="Settings">
     <h3>Settings — Groq API key</h3>
-    <p class="muted">Key is kept in session memory only (never written to disk by the app). You can also set <code>GROQ_API_KEY</code> in <code>.env</code> on the server.</p>
+    <p class="muted">Key is kept in server memory only (never in browser storage, never written to disk by the app). You can also set <code>GROQ_API_KEY</code> in <code>.env</code> on the server.</p>
     <input id="keyInput" class="input" type="password" placeholder="gsk_…" autocomplete="off" />
     <div class="row gap">
       <button id="saveKeyBtn" class="btn primary">Verify &amp; Save</button>

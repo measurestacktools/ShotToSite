@@ -5,7 +5,7 @@ import os
 import re
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, Header, Request, UploadFile
+from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, UnidentifiedImageError
@@ -25,6 +25,10 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 app = FastAPI(title="ShotToSite")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+# Groq API key lives ONLY in server process memory (or server env).
+# It is NEVER accepted from browser storage / per-request client values.
+_session_key: str | None = None
+
 
 @app.get("/", include_in_schema=False)
 def index():
@@ -38,17 +42,24 @@ def health():
 
 def resolve_api_key(explicit: str | None = None, header_key: str | None = None,
                     auth: str | None = None) -> str | None:
-    for cand in (explicit, header_key):
-        if cand and cand.strip():
-            return cand.strip()
-    if auth and auth.lower().startswith("bearer "):
-        tok = auth[7:].strip()
-        if tok:
-            return tok
+    # NOTE: client-supplied values (explicit/header/auth) are intentionally
+    # ignored. Keys live only in server memory (_session_key) or server env.
+    _ = (explicit, header_key, auth)
+    if _session_key and _session_key.strip():
+        return _session_key.strip()
     for env_name in ("GROQ_API_KEY", "GROQ_TEST_KEY"):
         v = os.getenv(env_name, "").strip()
         if v:
             return v
+    return None
+
+
+def key_source() -> str | None:
+    if _session_key and _session_key.strip():
+        return "server-memory"
+    for env_name in ("GROQ_API_KEY", "GROQ_TEST_KEY"):
+        if os.getenv(env_name, "").strip():
+            return f"env:{env_name}"
     return None
 
 
@@ -193,14 +204,41 @@ def call_refine(api_key: str, html: str, instruction: str) -> str:
 
 
 @app.get("/api/status")
-def api_status(request: Request, x_groq_key: str | None = Header(default=None, alias="X-Groq-Key")):
-    key = resolve_api_key(header_key=x_groq_key, auth=request.headers.get("authorization"))
-    return {"has_key": bool(key), "model": MODEL, "base_url": GROQ_BASE_URL}
+def api_status():
+    key = resolve_api_key()
+    return {"has_key": bool(key), "model": MODEL, "base_url": GROQ_BASE_URL, "source": key_source()}
+
+
+@app.post("/api/key")
+def api_set_key(body: dict):
+    global _session_key
+    key = ""
+    if isinstance(body, dict):
+        key = (body.get("key") or "").strip()
+    if not key:
+        return JSONResponse({"ok": False, "error": "No API key provided."}, status_code=400)
+    try:
+        client = make_client(key)
+        client.models.list()
+    except Exception as e:  # noqa: BLE001
+        code, msg = friendly_groq_error(e)
+        return JSONResponse({"ok": False, "error": msg}, status_code=code)
+    _session_key = key
+    return {"ok": True}
+
+
+@app.delete("/api/key")
+def api_delete_key():
+    global _session_key
+    _session_key = None
+    return {"ok": True}
 
 
 @app.post("/api/verify")
 def api_verify(body: dict):
-    key = (body.get("api_key") or "").strip() or os.getenv("GROQ_API_KEY", "").strip() or os.getenv("GROQ_TEST_KEY", "").strip()
+    # Verify-only (does not store). New flow uses POST /api/key.
+    raw = body if isinstance(body, dict) else {}
+    key = (raw.get("key") or "").strip()
     if not key:
         return JSONResponse({"ok": False, "error": "No API key provided."}, status_code=400)
     try:
@@ -217,10 +255,8 @@ async def api_generate(
     request: Request,
     image: UploadFile | None = File(default=None),
     style_hint: str = Form(default=""),
-    api_key: str = Form(default=""),
-    x_groq_key: str | None = Header(default=None, alias="X-Groq-Key"),
 ):
-    key = resolve_api_key(explicit=api_key or None, header_key=x_groq_key, auth=request.headers.get("authorization"))
+    key = resolve_api_key()
     if not key:
         return JSONResponse({"error": "No Groq API key. Open Settings and add one (or set GROQ_API_KEY in .env)."}, status_code=401)
     if image is None or not image.filename:
@@ -249,11 +285,7 @@ async def api_refine(request: Request):
         body = await request.json()
     except Exception:
         return JSONResponse({"error": "Invalid JSON body. Send {html, instruction}."}, status_code=400)
-    key = resolve_api_key(
-        explicit=(body.get("api_key") or None),
-        header_key=request.headers.get("x-groq-key"),
-        auth=request.headers.get("authorization"),
-    )
+    key = resolve_api_key()
     if not key:
         return JSONResponse({"error": "No Groq API key. Open Settings and add one."}, status_code=401)
     html_in = (body.get("html") or "").strip()
