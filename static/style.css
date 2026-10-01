@@ -50,6 +50,8 @@ body{
 .input{width:100%;padding:10px 12px;border-radius:0;border:1px solid var(--line);background:var(--blue-ink);color:var(--txt);font-family:inherit;font-size:13px}
 .input::placeholder{color:var(--muted)}
 .input:focus-visible{outline:3px solid var(--txt);outline-offset:1px}
+select.input.select{appearance:none;-webkit-appearance:none;cursor:pointer;background-image:linear-gradient(45deg,transparent 50%,var(--txt) 50%),linear-gradient(135deg,var(--txt) 50%,transparent 50%);background-position:calc(100% - 18px) 50%,calc(100% - 12px) 50%;background-size:6px 6px;background-repeat:no-repeat;padding-right:30px}
+select.input.select option{background:var(--blue-ink);color:var(--txt)}
 .row{margin:10px 0;display:flex}
 .row .dim{width:100%}
 .left .row{flex-wrap:wrap}

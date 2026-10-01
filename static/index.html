@@ -6,7 +6,7 @@
 <meta name="theme" content="blueprint-drafting-table" />
 <!-- theme: blueprint-drafting-table :: blueprint blue, white grid, technical-drawing strokes -->
 <title>ShotToSite — Screenshot → Website</title>
-<link rel="stylesheet" href="/static/style.css?v=2" />
+<link rel="stylesheet" href="/static/style.css?v=3" />
 </head>
 <body>
 <header class="topbar">
@@ -38,6 +38,15 @@
       <button id="generateBtn" class="btn primary">✨ Generate site</button>
       <button id="clearBtn" class="btn ghost">Clear</button>
     </div>
+    <div class="row">
+      <label class="dim" for="stackSelect">NOTE 01B — OUTPUT STACK</label>
+      <select id="stackSelect" class="input select">
+        <option value="html" selected>HTML — inline style (default)</option>
+        <option value="html-css">HTML+CSS — separate style block, no Tailwind</option>
+        <option value="tailwind">HTML+Tailwind — utilities via CDN</option>
+        <option value="react">React+Tailwind — single JSX component</option>
+      </select>
+    </div>
     <div id="uploadMeta" class="meta" aria-live="polite"></div>
 
     <h2>3 · Refine <span class="fig">FIG. B</span></h2>
@@ -46,6 +55,17 @@
       <input id="refineInput" class="input" placeholder="e.g. make the hero dark blue with bigger headline…" maxlength="500" />
     </div>
     <div class="row"><button id="refineBtn" class="btn accent">↻ Refine current site</button></div>
+
+    <h2>4 · Versions <span class="fig">FIG. C</span></h2>
+    <div class="row">
+      <label class="dim" for="versionSelect">NOTE 03 — VERSION HISTORY (KEPT 20 MAX)</label>
+      <select id="versionSelect" class="input select"><option value="">No versions yet — generate first</option></select>
+    </div>
+    <div class="row gap">
+      <button id="restoreBtn" class="btn small" disabled>⟲ Restore selected</button>
+      <button id="refreshVersionsBtn" class="btn small ghost">↻ Refresh list</button>
+    </div>
+    <div id="versionMeta" class="meta" aria-live="polite"></div>
 
     <p class="note">Output is an <strong>inspired recreation</strong> — never pixel-perfect. Generated code runs only in the sandboxed preview below.</p>
     <div id="errorBox" class="error" hidden role="alert"></div>
@@ -91,6 +111,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=2"></script>
+<script src="/static/app.js?v=3"></script>
 </body>
 </html>

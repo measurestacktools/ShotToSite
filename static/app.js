@@ -1,5 +1,5 @@
 const $ = (id) => document.getElementById(id);
-const state = { file: null, html: "", previewUrl: null };
+const state = { file: null, html: "", stack: "html", previewUrl: null, versionId: null };
 const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
 const MAX_BYTES = 10 * 1024 * 1024;
 
@@ -14,9 +14,25 @@ async function refreshStatus() {
     else { pill.textContent = "no key"; pill.className = "pill off"; }
   } catch { /* offline */ }
 }
-function setHtml(html) {
+function escHtml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function reactPreviewShell(jsx) {
+  return "<!doctype html><html><body style=\"font-family:monospace;padding:24px;background:#f4f7ff;color:#0b2a5c\">"
+    + "<h2>React+Tailwind component (preview not rendered offline)</h2>"
+    + "<p>JSX cannot render without a React/Babel toolchain, and no external CDN is used so the app works offline. "
+    + "The component source is shown below and in the Code tab — paste it into a React + Tailwind project.</p>"
+    + "<pre style=\"white-space:pre-wrap;word-break:break-word;background:#0b2a5c;color:#f4f7ff;padding:14px\">"
+    + escHtml(jsx) + "</pre></body></html>";
+}
+function setHtml(html, stack) {
   state.html = html;
-  $("previewFrame").srcdoc = html;
+  state.stack = stack || state.stack || "html";
+  if (state.stack === "react") {
+    $("previewFrame").srcdoc = reactPreviewShell(html);
+  } else {
+    $("previewFrame").srcdoc = html;
+  }
   $("emptyState").style.display = "none";
   $("codeEl").textContent = html;
   $("copyBtn").disabled = false;
@@ -57,9 +73,72 @@ dz.addEventListener("keydown", (e) => {
 
 $("clearBtn").addEventListener("click", () => {
   setFile(null); fi.value = ""; $("styleHint").value = ""; $("refineInput").value = "";
-  state.html = ""; $("previewFrame").removeAttribute("srcdoc");
+  state.html = ""; state.stack = $("stackSelect").value || "html"; state.versionId = null;
+  $("previewFrame").removeAttribute("srcdoc");
   $("emptyState").style.display = "flex"; $("codeEl").textContent = "";
   $("copyBtn").disabled = true; $("downloadBtn").disabled = true; showError("");
+});
+
+async function fetchVersions() {
+  const sel = $("versionSelect"), meta = $("versionMeta");
+  try {
+    const r = await fetch("/api/versions");
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `Versions failed (${r.status})`);
+    const list = j.versions || [];
+    sel.innerHTML = "";
+    if (!list.length) {
+      const o = document.createElement("option");
+      o.value = ""; o.textContent = "No versions yet — generate first";
+      sel.appendChild(o);
+      $("restoreBtn").disabled = true;
+      meta.textContent = "";
+      return;
+    }
+    for (const v of list.slice().reverse()) {
+      const o = document.createElement("option");
+      const when = (v.timestamp || "").slice(0, 19).replace("T", " ");
+      o.value = v.id;
+      o.textContent = `${v.label} · ${v.stack || "html"} · ${when}${v.current ? " ●" : ""}`;
+      if (v.id === state.versionId || v.current) o.selected = true;
+      sel.appendChild(o);
+    }
+    if (!sel.value && sel.options.length) sel.selectedIndex = 0;
+    $("restoreBtn").disabled = !sel.value;
+    const cur = list.find((v) => v.id === sel.value);
+    meta.textContent = cur ? `${cur.id} · prompt: ${(cur.prompt || "—").slice(0, 120)}` : "";
+  } catch (e) { meta.textContent = e.message; }
+}
+$("versionSelect").addEventListener("change", () => {
+  $("restoreBtn").disabled = !$("versionSelect").value;
+  fetchVersionsMetaOnly();
+});
+async function fetchVersionsMetaOnly() {
+  try {
+    const r = await fetch("/api/versions");
+    const j = await r.json().catch(() => ({}));
+    const cur = (j.versions || []).find((v) => v.id === $("versionSelect").value);
+    if (cur) $("versionMeta").textContent = `${cur.id} · ${cur.label} · ${cur.stack} · prompt: ${(cur.prompt || "—").slice(0, 120)}`;
+  } catch { /* ignore */ }
+}
+$("refreshVersionsBtn").addEventListener("click", fetchVersions);
+$("restoreBtn").addEventListener("click", async () => {
+  showError("");
+  const vid = $("versionSelect").value;
+  if (!vid) { showError("Pick a version first."); return; }
+  $("restoreBtn").disabled = true;
+  setLoading(true, "Restoring version…");
+  try {
+    const r = await fetch(`/api/versions/${encodeURIComponent(vid)}/restore`, { method: "POST" });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || `Restore failed (${r.status})`);
+    setHtml(j.html, j.stack || "html");
+    state.versionId = j.version_id || vid;
+    if ($("stackSelect") && j.stack) $("stackSelect").value = j.stack;
+    activateTab("preview");
+    await fetchVersions();
+  } catch (e) { showError(e.message); }
+  finally { setLoading(false); $("restoreBtn").disabled = !$("versionSelect").value; }
 });
 
 $("generateBtn").addEventListener("click", async () => {
@@ -71,11 +150,14 @@ $("generateBtn").addEventListener("click", async () => {
     const fd = new FormData();
     fd.append("image", state.file);
     fd.append("style_hint", $("styleHint").value || "");
+    fd.append("stack", $("stackSelect").value || "html");
     const r = await fetch("/api/generate", { method: "POST", body: fd });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
-    setHtml(j.html);
+    setHtml(j.html, j.stack || $("stackSelect").value || "html");
+    state.versionId = j.version_id || null;
     activateTab("preview");
+    await fetchVersions();
   } catch (e) { showError(e.message); }
   finally { setLoading(false); $("generateBtn").disabled = false; }
 });
@@ -90,11 +172,13 @@ $("refineBtn").addEventListener("click", async () => {
   try {
     const r = await fetch("/api/refine", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ html: state.html, instruction: ins }),
+      body: JSON.stringify({ html: state.html, instruction: ins, stack: state.stack || "html" }),
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
-    setHtml(j.html);
+    setHtml(j.html, j.stack || state.stack || "html");
+    state.versionId = j.version_id || null;
+    await fetchVersions();
   } catch (e) { showError(e.message); }
   finally { setLoading(false); $("refineBtn").disabled = false; }
 });
@@ -114,10 +198,12 @@ $("copyBtn").addEventListener("click", async () => {
   catch { showError("Copy blocked by browser — select the code manually."); }
 });
 $("downloadBtn").addEventListener("click", () => {
-  const blob = new Blob([state.html], { type: "text/html" });
+  const ext = state.stack === "react" ? "jsx" : "html";
+  const mime = state.stack === "react" ? "text/jsx" : "text/html";
+  const blob = new Blob([state.html], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url; a.download = "shot-to-site.html";
+  a.href = url; a.download = `shot-to-site.${ext}`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 });
@@ -143,7 +229,8 @@ $("saveKeyBtn").addEventListener("click", async () => {
     if (!r.ok || !j.ok) throw new Error(j.error || `Verify failed (${r.status})`);
     $("keyInput").value = "";
     $("keyMsg").textContent = "✓ Key verified & saved in server memory.";
-    refreshStatus();
+refreshStatus();
+fetchVersions();
   } catch (e) { $("keyMsg").textContent = e.message; }
   finally { $("saveKeyBtn").disabled = false; }
 });

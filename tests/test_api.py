@@ -94,7 +94,7 @@ def test_generate_fake_key_returns_auth_error(monkeypatch):
     class AuthenticationError(Exception):
         status_code = 401
 
-    def fake_call(api_key, data_uri, style_hint):
+    def fake_call(api_key, data_uri, style_hint, stack=None):
         raise AuthenticationError("invalid api key")
 
     monkeypatch.setattr(appmod, "call_vision", fake_call)

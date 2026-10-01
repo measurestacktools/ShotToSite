@@ -3,6 +3,9 @@ import base64
 import io
 import os
 import re
+import threading
+import uuid
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, Request, UploadFile
@@ -166,18 +169,183 @@ REFINE_SYSTEM = (
     "inside one ```html fenced block. Keep inline <style>/<script>, responsive. No explanations."
 )
 
+# --- Output stacks (stack param on /api/generate, backward-compatible default "html") ---
+STACK_OUTPUT_INSTRUCTIONS = {
+    "html": (
+        "Return ONE single self-contained HTML file with inline <style> and <script> only "
+        "(no external CSS/JS files, no Tailwind, no CDN dependencies; CDN fonts ok but optional). "
+        "Make it responsive (flex/grid + media queries, mobile-first), semantic, accessible. "
+        "Output ONLY the HTML inside a single ```html fenced code block, no explanations."
+    ),
+    "html-css": (
+        "Return ONE single self-contained HTML file with semantic HTML and ONE separate "
+        "<style> block in <head>. Use hand-written vanilla CSS only — NO Tailwind, NO utility "
+        "classes, NO external CSS/JS or CDN links at all. Keep selectors clean, responsive "
+        "(flex/grid + media queries, mobile-first), accessible. "
+        "Output ONLY the HTML inside a single ```html fenced code block, no explanations."
+    ),
+    "tailwind": (
+        "Return ONE single self-contained HTML file that styles primarily with Tailwind CSS "
+        "via CDN (<script src=\"https://cdn.tailwindcss.com\"></script>) plus a minimal inline "
+        "<style> block only where Tailwind cannot express something. Use Tailwind utility "
+        "classes for layout/typography/spacing, responsive (md:/lg: prefixes), semantic, "
+        "accessible. Output ONLY the HTML inside a single ```html fenced code block, no explanations."
+    ),
+    "react": (
+        "Return ONE single React component as the default-export function App() using Tailwind "
+        "utility classes for styling (assume Tailwind is already loaded; no imports beyond "
+        "'react'). Keep it a single self-contained component, no external files, responsive, "
+        "accessible. Output ONLY the component inside a single ```jsx fenced code block, "
+        "no explanations, no surrounding HTML."
+    ),
+}
+VALID_STACKS = set(STACK_OUTPUT_INSTRUCTIONS)
 
-def call_vision(api_key: str, data_uri: str, style_hint: str) -> str:
+STACK_LABELS = {
+    "html": "HTML",
+    "html-css": "HTML+CSS",
+    "tailwind": "HTML+Tailwind",
+    "react": "React+Tailwind",
+}
+
+
+def normalize_stack(stack: str | None) -> str:
+    s = (stack or "").strip().lower()
+    return s if s in VALID_STACKS else "html"
+
+
+def generate_system_for(stack: str | None) -> str:
+    s = normalize_stack(stack)
+    if s == "html":
+        return GENERATE_SYSTEM
+    return (
+        "You are an expert front-end developer. Recreate the provided screenshot as a web page. "
+        "This is an INSPIRED RECREATION, never claim pixel-perfect. "
+        + STACK_OUTPUT_INSTRUCTIONS[s]
+    )
+
+
+def refine_system_for(stack: str | None) -> str:
+    s = normalize_stack(stack) if stack else "html"
+    if s == "html" or not stack:
+        return REFINE_SYSTEM
+    if s == "react":
+        return (
+            "You are an expert front-end developer editing a single React component (default "
+            "export function App) styled with Tailwind utility classes. Apply the user's "
+            "instruction and return the FULL updated component inside one ```jsx fenced block. "
+            "No explanations, no surrounding HTML."
+        )
+    if s == "html-css":
+        return (
+            "You are an expert front-end developer editing a single self-contained HTML file "
+            "styled with hand-written vanilla CSS in one <style> block (no Tailwind, no CDN). "
+            "Apply the user's instruction and return the FULL updated HTML file inside one "
+            "```html fenced block. No explanations."
+        )
+    # tailwind
+    return (
+        "You are an expert front-end developer editing a single self-contained HTML file styled "
+        "primarily with Tailwind CSS via CDN plus minimal inline <style>. Apply the user's "
+        "instruction and return the FULL updated HTML file inside one ```html fenced block. "
+        "No explanations."
+    )
+
+
+def extract_react(text: str) -> str | None:
+    if not text or not text.strip():
+        return None
+    fences = re.findall(r"```(?:jsx|tsx|js|javascript|html)?\s*\n?(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    candidates = [c.strip() for c in fences if c.strip()]
+    if candidates:
+        # prefer a block that looks like a component
+        for best in sorted(candidates, key=len, reverse=True):
+            if ("<" in best and ">" in best) and re.search(
+                r"(function\s+App|default\s+export|const\s+App|return\s*\(|className=)", best
+            ):
+                return best
+        best = max(candidates, key=len)
+        if "<" in best and ">" in best:
+            return best
+    t = text.strip()
+    if re.search(r"(function\s+App|default\s+export|const\s+App)", t) and "<" in t and ">" in t:
+        return t
+    return None
+
+
+# --- Version history (additive, in-memory, cap 20) ---
+_versions: list[dict] = []
+_versions_lock = threading.Lock()
+_version_seq = 0
+_current_id: str | None = None
+VERSION_CAP = 20
+
+
+def add_version(label: str, html: str, prompt: str, stack: str) -> dict:
+    global _version_seq, _current_id
+    with _versions_lock:
+        _version_seq += 1
+        entry = {
+            "id": f"v{_version_seq:03d}-{uuid.uuid4().hex[:6]}",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "label": label,
+            "html": html,
+            "prompt": prompt or "",
+            "stack": normalize_stack(stack),
+        }
+        _versions.append(entry)
+        while len(_versions) > VERSION_CAP:
+            _versions.pop(0)
+        _current_id = entry["id"]
+        return entry
+
+
+def version_meta(v: dict) -> dict:
+    return {
+        "id": v["id"],
+        "timestamp": v["timestamp"],
+        "label": v["label"],
+        "stack": v.get("stack", "html"),
+        "prompt": v.get("prompt", ""),
+        "current": v["id"] == _current_id,
+    }
+
+
+def find_version(vid: str) -> dict | None:
+    with _versions_lock:
+        for v in _versions:
+            if v["id"] == vid:
+                return v
+    return None
+
+
+def clear_versions() -> None:
+    global _version_seq, _current_id
+    with _versions_lock:
+        _versions.clear()
+        _version_seq = 0
+        _current_id = None
+
+
+def call_vision(api_key: str, data_uri: str, style_hint: str, stack: str | None = None) -> str:
     client = make_client(api_key)
     hint = f" Style hint: {style_hint.strip()}" if style_hint and style_hint.strip() else ""
-    user_text = (
-        "Recreate this screenshot as one self-contained responsive HTML file "
-        f"(inspired recreation).{hint} Return only ```html ... ```."
-    )
+    system = generate_system_for(stack)
+    s = normalize_stack(stack)
+    if s == "react":
+        user_text = (
+            "Recreate this screenshot as one self-contained React component (default export App, "
+            f"Tailwind utilities, inspired recreation).{hint} Return only ```jsx ... ```."
+        )
+    else:
+        user_text = (
+            "Recreate this screenshot as one self-contained responsive HTML file "
+            f"(inspired recreation).{hint} Return only ```html ... ```."
+        )
     resp = client.chat.completions.create(
         model=MODEL,
         messages=[
-            {"role": "system", "content": GENERATE_SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": [
                 {"type": "text", "text": user_text},
                 {"type": "image_url", "image_url": {"url": data_uri}},
@@ -189,12 +357,13 @@ def call_vision(api_key: str, data_uri: str, style_hint: str) -> str:
     return resp.choices[0].message.content or ""
 
 
-def call_refine(api_key: str, html: str, instruction: str) -> str:
+def call_refine(api_key: str, html: str, instruction: str, stack: str | None = None) -> str:
     client = make_client(api_key)
+    system = refine_system_for(stack) if stack else REFINE_SYSTEM
     resp = client.chat.completions.create(
         model=MODEL,
         messages=[
-            {"role": "system", "content": REFINE_SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": f"Instruction: {instruction}\n\nCurrent HTML:\n{html[:60000]}"},
         ],
         max_tokens=6000,
@@ -255,12 +424,14 @@ async def api_generate(
     request: Request,
     image: UploadFile | None = File(default=None),
     style_hint: str = Form(default=""),
+    stack: str = Form(default="html"),
 ):
     key = resolve_api_key()
     if not key:
         return JSONResponse({"error": "No Groq API key. Open Settings and add one (or set GROQ_API_KEY in .env)."}, status_code=401)
     if image is None or not image.filename:
         return JSONResponse({"error": "No image uploaded. Drag-drop a JPG/PNG/WEBP/GIF screenshot."}, status_code=400)
+    stack = normalize_stack(stack)
     raw = await image.read()
     if not raw:
         return JSONResponse({"error": "Empty file. Upload a real screenshot."}, status_code=400)
@@ -269,14 +440,26 @@ async def api_generate(
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
     try:
-        out = call_vision(key, data_uri, style_hint)
+        out = call_vision(key, data_uri, style_hint, stack)
     except Exception as e:  # noqa: BLE001
         code, msg = friendly_groq_error(e)
         return JSONResponse({"error": msg}, status_code=code)
-    html = extract_html(out)
-    if not html:
-        return JSONResponse({"error": "Model did not return HTML. Try a clearer screenshot or different style hint."}, status_code=502)
-    return {"html": html, "width": w, "height": h, "model": MODEL}
+    if stack == "react":
+        code_out = extract_react(out) or extract_html(out)
+        err = "Model did not return a React component. Try a clearer screenshot or different style hint."
+    else:
+        code_out = extract_html(out)
+        err = "Model did not return HTML. Try a clearer screenshot or different style hint."
+    if not code_out:
+        return JSONResponse({"error": err}, status_code=502)
+    entry = add_version(
+        label=f"Generate ({STACK_LABELS.get(stack, stack)})",
+        html=code_out,
+        prompt=(style_hint or "").strip(),
+        stack=stack,
+    )
+    return {"html": code_out, "width": w, "height": h, "model": MODEL,
+            "stack": stack, "version_id": entry["id"]}
 
 
 @app.post("/api/refine")
@@ -290,16 +473,60 @@ async def api_refine(request: Request):
         return JSONResponse({"error": "No Groq API key. Open Settings and add one."}, status_code=401)
     html_in = (body.get("html") or "").strip()
     instruction = (body.get("instruction") or "").strip()
+    # Optional stack passthrough (backward-compatible: absent/None => legacy HTML flow unchanged).
+    raw_stack = body.get("stack", None)
+    stack = normalize_stack(raw_stack) if raw_stack else None
+    refine_stack = stack or "html"
     if not html_in:
         return JSONResponse({"error": "No HTML to refine. Generate a site first."}, status_code=400)
     if not instruction:
         return JSONResponse({"error": "Describe the change (e.g. 'make the hero dark blue')."}, status_code=400)
     try:
-        out = call_refine(key, html_in, instruction)
+        # NOTE: previous html IS sent (fidelity): full current code + instruction.
+        out = call_refine(key, html_in, instruction, stack)
     except Exception as e:  # noqa: BLE001
         code, msg = friendly_groq_error(e)
         return JSONResponse({"error": msg}, status_code=code)
-    html = extract_html(out)
+    if refine_stack == "react":
+        html = extract_react(out) or extract_html(out)
+        err = "Model did not return a React component for the refinement. Try rephrasing."
+    else:
+        html = extract_html(out)
+        err = "Model did not return HTML for the refinement. Try rephrasing."
     if not html:
-        return JSONResponse({"error": "Model did not return HTML for the refinement. Try rephrasing."}, status_code=502)
-    return {"html": html, "model": MODEL}
+        return JSONResponse({"error": err}, status_code=502)
+    entry = add_version(label="Refine", html=html, prompt=instruction, stack=refine_stack)
+    return {"html": html, "model": MODEL, "stack": refine_stack, "version_id": entry["id"]}
+
+
+@app.get("/api/versions")
+def api_versions():
+    with _versions_lock:
+        items = [version_meta(v) for v in _versions]
+    return {"versions": items}
+
+
+@app.get("/api/versions/{vid}")
+def api_version_get(vid: str):
+    v = find_version(vid)
+    if not v:
+        return JSONResponse({"error": "Version not found."}, status_code=404)
+    return {
+        "id": v["id"], "timestamp": v["timestamp"], "label": v["label"],
+        "stack": v.get("stack", "html"), "prompt": v.get("prompt", ""),
+        "html": v["html"], "current": v["id"] == _current_id,
+    }
+
+
+@app.post("/api/versions/{vid}/restore")
+def api_version_restore(vid: str):
+    global _current_id
+    with _versions_lock:
+        for v in _versions:
+            if v["id"] == vid:
+                _current_id = v["id"]
+                return {
+                    "html": v["html"], "stack": v.get("stack", "html"),
+                    "version_id": v["id"], "label": v["label"],
+                }
+    return JSONResponse({"error": "Version not found."}, status_code=404)
