@@ -1,53 +1,58 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="blueprint-drafting-table">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="theme" content="blueprint-drafting-table" />
+<!-- theme: blueprint-drafting-table :: blueprint blue, white grid, technical-drawing strokes -->
 <title>ShotToSite — Screenshot → Website</title>
-<link rel="stylesheet" href="/static/style.css" />
+<link rel="stylesheet" href="/static/style.css?v=2" />
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="logo">◈</span> ShotToSite <em>inspired recreation</em></div>
+  <div class="brand"><span class="logo" aria-hidden="true">⌖</span> ShotToSite <em>DWG-8005 · inspired recreation</em></div>
   <div class="top-actions">
     <span id="statusPill" class="pill off" title="Groq key status">no key</span>
     <button id="settingsBtn" class="btn ghost">⚙ Settings</button>
   </div>
 </header>
+<div class="sheet-bar" aria-hidden="true"><span>SHEET 01 / 01</span><span>SCALE —</span><span>UNITS PX</span><span>TOL ±1PX</span><span class="sheet-right">DO NOT SCALE DRAWING</span></div>
 
 <main class="layout">
-  <section class="left panel">
-    <h2>1 · Upload screenshot</h2>
+  <section class="left panel" aria-label="Input sheet">
+    <h2>1 · Upload screenshot <span class="fig">FIG. A</span></h2>
     <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Upload screenshot">
       <input id="fileInput" type="file" accept=".jpg,.jpeg,.png,.webp,.gif,image/jpeg,image/png,image/webp,image/gif" hidden />
       <div class="dz-inner">
-        <div class="dz-icon">🖼️</div>
+        <div class="dz-icon" aria-hidden="true">▦</div>
         <p><strong>Drag &amp; drop</strong> a screenshot here, or <button class="link" id="browseBtn" type="button">browse</button></p>
         <small>JPG · PNG · WEBP · GIF · ≤ 10 MB · validated &amp; downscaled server-side</small>
       </div>
       <img id="previewImg" alt="screenshot preview" hidden />
     </div>
     <div class="row">
+      <label class="dim" for="styleHint">NOTE 01 — STYLE HINT (OPT.)</label>
       <input id="styleHint" class="input" placeholder="Style hint (optional) e.g. dark modern SaaS, rounded cards…" maxlength="300" />
     </div>
     <div class="row gap">
       <button id="generateBtn" class="btn primary">✨ Generate site</button>
       <button id="clearBtn" class="btn ghost">Clear</button>
     </div>
-    <div id="uploadMeta" class="meta"></div>
+    <div id="uploadMeta" class="meta" aria-live="polite"></div>
 
-    <h2>3 · Refine</h2>
+    <h2>3 · Refine <span class="fig">FIG. B</span></h2>
     <div class="row">
+      <label class="dim" for="refineInput">NOTE 02 — REVISION INSTRUCTION</label>
       <input id="refineInput" class="input" placeholder="e.g. make the hero dark blue with bigger headline…" maxlength="500" />
     </div>
     <div class="row"><button id="refineBtn" class="btn accent">↻ Refine current site</button></div>
 
     <p class="note">Output is an <strong>inspired recreation</strong> — never pixel-perfect. Generated code runs only in the sandboxed preview below.</p>
-    <div id="errorBox" class="error" hidden></div>
-    <div id="loading" class="loading" hidden><span class="spinner"></span> <span id="loadingText">Generating…</span></div>
+    <div id="errorBox" class="error" hidden role="alert"></div>
+    <div id="loading" class="loading" hidden><span class="spinner" aria-hidden="true"></span> <span id="loadingText">Generating…</span></div>
   </section>
 
-  <section class="right panel">
+  <section class="right panel" aria-label="Output sheet">
     <div class="tabs">
       <button id="tabPreview" class="tab active">Preview</button>
       <button id="tabCode" class="tab">Code</button>
@@ -63,6 +68,15 @@
   </section>
 </main>
 
+<footer class="revblock" aria-label="Revision block">
+  <table>
+    <tr><th>REV</th><th>DESCRIPTION</th><th>DATE</th><th>APP'D</th></tr>
+    <tr><td>P02</td><td>Blueprint drafting-table retheme · mono annotations · grid sheet</td><td>2026-10-01</td><td>—</td></tr>
+    <tr><td>P01</td><td>Initial sheet — screenshot-to-website builder, sandboxed preview</td><td>—</td><td>—</td></tr>
+  </table>
+  <div class="titleblock"><strong>SHOT-TO-SITE</strong><span>DWG NO. STS-8005 · SHEET 01/01 · SCALE — · PROJECTION: BROWSER</span></div>
+</footer>
+
 <div id="settingsModal" class="modal" hidden>
   <div class="modal-card" role="dialog" aria-modal="true" aria-label="Settings">
     <h3>Settings — Groq API key</h3>
@@ -73,10 +87,10 @@
       <button id="removeKeyBtn" class="btn ghost">Remove</button>
       <button id="closeSettingsBtn" class="btn ghost">Close</button>
     </div>
-    <div id="keyMsg" class="meta"></div>
+    <div id="keyMsg" class="meta" aria-live="polite"></div>
   </div>
 </div>
 
-<script src="/static/app.js"></script>
+<script src="/static/app.js?v=2"></script>
 </body>
 </html>
