@@ -28,6 +28,12 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 app = FastAPI(title="ShotToSite")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    """Serve the app icon so browsers never 404 on /favicon.ico."""
+    return FileResponse(os.path.join(STATIC_DIR, "favicon.svg"), media_type="image/svg+xml")
+
+
 # Groq API key lives ONLY in server process memory (or server env).
 # It is NEVER accepted from browser storage / per-request client values.
 _session_key: str | None = None
