@@ -2,6 +2,28 @@
 
 Upload a screenshot, get an **inspired recreation** as a single self-contained HTML file. Never pixel-perfect by design.
 
+## Features
+- Drag-drop screenshot upload with preview (JPG/PNG/WEBP/GIF ≤10MB)
+- AI-generated responsive HTML/CSS/JS, sandboxed live preview, code view
+- Copy, download `.html`, refine with instructions ("make it mobile", "change colors")
+
+## Requirements
+- Python 3.10+
+- A free Groq API key ([console.groq.com/keys](https://console.groq.com/keys))
+- Internet (AI calls go to Groq)
+
+## Installation
+```bash
+python -m venv .venv
+# Windows: .venv\Scripts\activate | macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## How to use
+1. Add your key via Settings (verified instantly) or `.env`
+2. Drop a screenshot → **Generate** → watch the live preview
+3. Switch to **Code**, copy/download, or **Refine** with instructions
+
 ## Stack
 Python + FastAPI + vanilla HTML/CSS/JS. OpenAI SDK pointed at `https://api.groq.com/openai/v1`, vision model `qwen/qwen3.8-27b`.
 
